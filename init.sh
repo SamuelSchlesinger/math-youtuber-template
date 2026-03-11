@@ -1,68 +1,42 @@
 #!/bin/bash
-# Scaffold a new math-youtuber project directory.
+# Initialize a chalk project in the current directory.
 #
 # Usage:
-#   ./new-project.sh <project-dir> <video-title>
+#   ./init.sh "video title"
 #
-# Example:
-#   ./new-project.sh ../03-11-2026 "lambda calculus"
+# Creates .venv, clips/, output/, and starter files (script.md,
+# generate_narration.py, timed_scenes.py, voiceover.sh).
+# Safe to re-run — skips files that already exist.
 
 set -euo pipefail
 
-SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-if [ $# -lt 2 ]; then
-    echo "Usage: $0 <project-dir> <video-title>"
-    echo "  e.g. $0 ../03-11-2026 \"lambda calculus\""
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 \"video title\""
+    echo "  e.g. $0 \"lambda calculus\""
     exit 1
 fi
 
-PROJECT_DIR="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
-TITLE="$2"
+TITLE="$1"
 
-if [ -d "$PROJECT_DIR" ] && [ "$(ls -A "$PROJECT_DIR" 2>/dev/null)" ]; then
-    echo "ERROR: $PROJECT_DIR already exists and is not empty"
-    exit 1
-fi
+echo "initializing chalk project: $TITLE"
 
-echo "scaffolding project: $PROJECT_DIR"
-echo "  title: $TITLE"
+# ── directories ──────────────────────────────────────────────
+mkdir -p clips output/segments
 
-mkdir -p "$PROJECT_DIR"/{clips,output/segments}
-
-# ── venv ──────────────────────────────────────────────────────
-# look for a sibling .venv to symlink, otherwise create one
-SIBLING_VENV=""
-for d in "$PROJECT_DIR"/../*/; do
-    if [ -d "$d/.venv" ] && [ "$d" != "$PROJECT_DIR/" ]; then
-        SIBLING_VENV="$(cd "$d/.venv" && pwd)"
-        break
-    fi
-done
-
-if [ -n "$SIBLING_VENV" ]; then
-    echo "  linking .venv -> $SIBLING_VENV"
-    ln -sf "$SIBLING_VENV" "$PROJECT_DIR/.venv"
+# ── venv ─────────────────────────────────────────────────────
+if [ -d .venv ]; then
+    echo "  .venv exists, skipping"
 else
     echo "  creating .venv..."
-    python3 -m venv "$PROJECT_DIR/.venv"
-    "$PROJECT_DIR/.venv/bin/pip" install -q manim f5-tts-mlx soundfile
+    python3 -m venv .venv
+    .venv/bin/pip install -q manim f5-tts-mlx soundfile
 fi
 
-# ── find existing voice reference ─────────────────────────────
-VOICE_REF=""
-for d in "$PROJECT_DIR"/../*/clips/; do
-    if [ -f "${d}my_voice_ref_24k.wav" ]; then
-        VOICE_REF="$(cd "$d" && pwd)/my_voice_ref_24k.wav"
-        break
-    fi
-done
-
-# ── CLAUDE.md (copy template README as project-level context) ─
-cp "$SKILL_DIR/README.md" "$PROJECT_DIR/CLAUDE.md"
-
-# ── script.md ─────────────────────────────────────────────────
-cat > "$PROJECT_DIR/script.md" << EOF
+# ── script.md ────────────────────────────────────────────────
+if [ -f script.md ]; then
+    echo "  script.md exists, skipping"
+else
+cat > script.md << EOF
 # $TITLE
 
 ## intro
@@ -83,20 +57,23 @@ cat > "$PROJECT_DIR/script.md" << EOF
 > **[CUT TO MANIM: closing scene]**
 > fade to black
 EOF
+    echo "  created script.md"
+fi
 
-# ── generate_narration.py ─────────────────────────────────────
-REF_PATH="${VOICE_REF:-$PROJECT_DIR/clips/my_voice_ref_24k.wav}"
-cat > "$PROJECT_DIR/generate_narration.py" << PYEOF
+# ── generate_narration.py ────────────────────────────────────
+if [ -f generate_narration.py ]; then
+    echo "  generate_narration.py exists, skipping"
+else
+cat > generate_narration.py << 'PYEOF'
 """Generate all narration segments with explicit durations."""
 
 from f5_tts_mlx.generate import generate
 import subprocess
 import os
 
-BASE = "$PROJECT_DIR"
-CLIPS = f"{BASE}/clips"
+CLIPS = "clips"
 
-REF_AUDIO = "$REF_PATH"
+REF_AUDIO = "clips/my_voice_ref_24k.wav"
 REF_TEXT = (
     "replace this with the exact transcription of your reference audio"
 )
@@ -188,9 +165,14 @@ def main():
 if __name__ == "__main__":
     main()
 PYEOF
+    echo "  created generate_narration.py"
+fi
 
-# ── timed_scenes.py ───────────────────────────────────────────
-cat > "$PROJECT_DIR/timed_scenes.py" << 'PYEOF'
+# ── timed_scenes.py ──────────────────────────────────────────
+if [ -f timed_scenes.py ]; then
+    echo "  timed_scenes.py exists, skipping"
+else
+cat > timed_scenes.py << 'PYEOF'
 """Manim scenes — one class per narration segment.
 
 Timing is aligned to narration at ~2.5 words/sec. Use the class
@@ -238,9 +220,14 @@ class S01_Intro(Scene):
 
         self.wait(max(d - elapsed, 0.1))
 PYEOF
+    echo "  created timed_scenes.py"
+fi
 
 # ── timed_scenes_shorts.py ───────────────────────────────────
-cat > "$PROJECT_DIR/timed_scenes_shorts.py" << 'PYEOF'
+if [ -f timed_scenes_shorts.py ]; then
+    echo "  timed_scenes_shorts.py exists, skipping"
+else
+cat > timed_scenes_shorts.py << 'PYEOF'
 """Manim scenes for YouTube Shorts (1080x1920, 9:16 vertical).
 
 Adapted from timed_scenes.py with layout adjustments for the
@@ -297,10 +284,15 @@ class S01_Intro(Scene):
 
         self.wait(max(d - elapsed, 0.1))
 PYEOF
+    echo "  created timed_scenes_shorts.py"
+fi
 
-# ── voiceover.sh ──────────────────────────────────────────────
+# ── voiceover.sh ─────────────────────────────────────────────
 SLUG=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | tr ' ' '_' | tr -cd 'a-z0-9_')
-cat > "$PROJECT_DIR/voiceover.sh" << SHEOF
+if [ -f voiceover.sh ]; then
+    echo "  voiceover.sh exists, skipping"
+else
+cat > voiceover.sh << SHEOF
 #!/bin/bash
 # Record voiceover, composite segments, check durations, preview.
 #
@@ -311,7 +303,7 @@ cat > "$PROJECT_DIR/voiceover.sh" << SHEOF
 #   ./voiceover.sh durations       — compare voiceover vs video durations
 #   ./voiceover.sh play 05         — preview segment 05 video
 
-BASE="$PROJECT_DIR"
+BASE="."
 CLIPS="\$BASE/clips"
 OUT="\$BASE/output"
 
@@ -768,31 +760,26 @@ case "\${1:-}" in
         ;;
 esac
 SHEOF
-
-chmod +x "$PROJECT_DIR/voiceover.sh"
-
-# ── done ──────────────────────────────────────────────────────
-echo ""
-echo "=== project scaffolded ==="
-echo ""
-echo "  $PROJECT_DIR/"
-echo "  ├── script.md              <- write your script here"
-echo "  ├── generate_narration.py  <- add segments + voice ref"
-echo "  ├── timed_scenes.py        <- one scene class per segment (landscape)"
-echo "  ├── timed_scenes_shorts.py <- same scenes adapted for 9:16 vertical"
-echo "  ├── voiceover.sh           <- record, composite, check durations"
-echo "  ├── clips/"
-echo "  ├── output/"
-echo "  └── .venv/"
-echo ""
-
-if [ -n "$VOICE_REF" ]; then
-    echo "  voice reference found: $VOICE_REF"
-    echo "  (already set in generate_narration.py)"
-else
-    echo "  next step: record a voice reference"
-    echo "    ../math-youtuber-template/record-reference.sh $PROJECT_DIR/clips"
+chmod +x voiceover.sh
+    echo "  created voiceover.sh"
 fi
 
+# ── done ─────────────────────────────────────────────────────
 echo ""
-echo "  then: edit script.md, fill in generate_narration.py, and go!"
+echo "=== chalk project ready ==="
+echo ""
+echo "  script.md              <- write your script here"
+echo "  generate_narration.py  <- add segments + voice ref"
+echo "  timed_scenes.py        <- one scene class per segment (landscape)"
+echo "  timed_scenes_shorts.py <- same scenes adapted for 9:16 vertical"
+echo "  render.sh              <- render all scenes (handles quality + shorts)"
+echo "  voiceover.sh           <- record, composite, check durations"
+echo "  clips/"
+echo "  output/"
+echo "  .venv/"
+echo ""
+echo "next: activate the venv and record a voice reference"
+echo "  source .venv/bin/activate"
+echo "  ./record-reference.sh clips"
+echo ""
+echo "then: edit script.md, fill in generate_narration.py, and go!"
