@@ -60,7 +60,7 @@ project/
 
 **segment count:** 10-25 segments of 4-20 seconds each.
 
-**duration estimation:** word count / 2.5 = speech duration in seconds.
+**duration estimation:** word count / 2.5 ≈ speech duration in seconds (for TTS). if the user is recording voiceover, this will vary — use actual recorded durations as feedback and adjust timing accordingly.
 
 | words | duration | good for |
 |-------|----------|----------|
@@ -183,6 +183,7 @@ edit `timed_scenes.py` — one scene class per segment, durations from DUR dict.
 - `DUR` dict at top — durations defined once, referenced by descriptive key
 - elapsed time tracking in comments — `self.wait(max(d - elapsed, 0.1))` at end
 - scene naming: `S01_Intro`, `S03b_PublicKey` — number prefix for order, name for content
+- **sync visuals to narration** — use the class docstring to write out the spoken text with `|` delimiters between phrases. estimate when each phrase lands (~2.5 words/sec for TTS) and place `self.wait()` calls so animations fire at the right moment. the goal is that each visual appears as the viewer hears it described, not before or after. note: if the user is recording their own voiceover, speaking pace will vary — treat 2.5 w/s as a starting estimate and adjust based on actual recorded durations
 
 ### step 5: render animations
 
@@ -192,8 +193,11 @@ source .venv/bin/activate
 # single scene (iteration)
 manim render -ql timed_scenes.py S05_Elegant
 
-# all scenes
-manim render -ql timed_scenes.py
+# all scenes — must specify each by name (omitting the scene name
+# causes an interactive prompt that breaks automation)
+for scene in S01_Intro S02_Concept S03_Detail; do
+    manim render -ql timed_scenes.py "$scene"
+done
 
 # quality flags:
 #   -ql  480p/15fps   fast iteration
@@ -201,8 +205,6 @@ manim render -ql timed_scenes.py
 #   -qh  1080p/60fps  final render
 #   -qk  4K/60fps     4K final
 ```
-
-**important:** voiceover.sh's `VIDEO` path must match the quality you rendered at.
 
 ### step 6: record voiceover (optional)
 
@@ -284,11 +286,13 @@ self.play(obj.animate.set_fill(GREEN, opacity=0.8))         # color change
 ### f5-tts-mlx
 - **never use `estimate_duration=True`** — causes massive overshooting and hallucinated speech
 - **transcription accuracy is critical** — wrong text = garbled output
+- **spell out variable names phonetically** — TTS can't pronounce single letters well. "a" sounds like filler, "b" is ambiguous. use greek letters in spoken text: "alpha", "beta", "kappa". the manim visuals can show the corresponding symbols (α, β, κ)
 - **cfg_strength=3.5** — sweet spot for cloning. below 2.0 sounds generic, above 4.0 sounds overfit
 - **reference audio must be 24kHz mono** — model hard-errors on anything else
 - **8-12 seconds of clean reference** — more isn't better (model clips at 12s)
 
 ### manim
+- **always specify scene names when rendering** — `manim render -ql timed_scenes.py` without a scene name triggers an interactive prompt that breaks automation. render each scene explicitly in a loop
 - **one scene class per segment** — much easier to time than monolithic scenes
 - **networkx layouts are 2d, manim wants 3d** — convert with `{k: [v[0], v[1], 0] for k, v in layout.items()}`
 - **`Text` submobjects are SVG paths, not characters** — use `save_state()` + `Restore()` for scatter-assemble
@@ -304,3 +308,5 @@ self.play(obj.animate.set_fill(GREEN, opacity=0.8))         # color change
 - **iterate at 8 steps / `-ql`** — 5-10x faster than production. check timing before committing
 - **script is the single source of truth** — all other files derive from it
 - **voice reference recording matters** — the AI clones cadence and energy, not just timbre
+- **line up visuals with narration** — animations should appear in sync with the words describing them. if you say "square both sides" while the equation is already on screen, it feels disconnected. time `self.play()` calls to land with the spoken cues
+- **abrupt audio cuts between segments are jarring** — each TTS segment starts cold, so back-to-back segments can sound choppy. use brief pauses (0.3-0.5s silence) between segments in concatenation, and keep vocal energy consistent across segments by using the same reference audio and cfg_strength

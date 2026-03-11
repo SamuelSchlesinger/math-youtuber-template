@@ -188,7 +188,12 @@ PYEOF
 
 # ── timed_scenes.py ───────────────────────────────────────────
 cat > "$PROJECT_DIR/timed_scenes.py" << 'PYEOF'
-"""Manim scenes — one class per narration segment."""
+"""Manim scenes — one class per narration segment.
+
+Timing is aligned to narration at ~2.5 words/sec. Use the class
+docstring to map spoken phrases to animation cues, and self.wait()
+calls to hold until the next phrase lands.
+"""
 
 from manim import *
 
@@ -209,6 +214,8 @@ DUR = {
 
 
 class S01_Intro(Scene):
+    """opening line goes here. | second phrase. | third phrase."""
+
     def setup(self):
         self.camera.background_color = BG
 
@@ -216,9 +223,15 @@ class S01_Intro(Scene):
         d = DUR["intro"]
         elapsed = 0
 
+        # "opening line goes here" — title appears with the words
         title = Text("Title", font_size=72, color=WHITE)
-        self.play(FadeIn(title), run_time=1.0)
-        elapsed += 1.0
+        self.play(FadeIn(title), run_time=0.8)
+        elapsed += 0.8
+
+        # "second phrase" — hold, then animate when phrase lands ~2.5s
+        self.wait(1.7)
+        elapsed += 1.7
+        # ... next animation here ...
 
         self.wait(max(d - elapsed, 0.1))
 PYEOF
@@ -238,8 +251,22 @@ cat > "$PROJECT_DIR/voiceover.sh" << SHEOF
 
 BASE="$PROJECT_DIR"
 CLIPS="\$BASE/clips"
-VIDEO="\$BASE/media/videos/timed_scenes/1080p60"
 OUT="\$BASE/output"
+
+# ── auto-detect render quality ───────────────────────────────
+# check from highest to lowest quality
+VIDEO=""
+for q in 2160p60 1080p60 720p30 480p15; do
+    if [ -d "\$BASE/media/videos/timed_scenes/\$q" ]; then
+        VIDEO="\$BASE/media/videos/timed_scenes/\$q"
+        break
+    fi
+done
+if [ -z "\$VIDEO" ]; then
+    echo "WARNING: no rendered videos found in media/videos/timed_scenes/"
+    echo "  render first: manim render -qh timed_scenes.py SceneName"
+    VIDEO="\$BASE/media/videos/timed_scenes/1080p60"  # fallback
+fi
 SLUG="$SLUG"
 
 mkdir -p "\$OUT/segments"
