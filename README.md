@@ -1,4 +1,4 @@
-# math-youtuber-skill
+# math-youtuber-template
 
 compose scripted math explainer videos entirely from the command line on macOS.
 no GUI editors, no drag-and-drop timelines — just python, ffmpeg, and a microphone.
@@ -144,7 +144,7 @@ record 8-12 seconds of yourself reading a line from the script:
 
 ```bash
 # use the helper script
-../math-youtuber-skill/record-reference.sh
+../math-youtuber-template/record-reference.sh
 
 # or manually
 rec clips/my_voice_ref.wav

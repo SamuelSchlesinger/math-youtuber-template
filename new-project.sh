@@ -58,6 +58,9 @@ for d in "$PROJECT_DIR"/../*/clips/; do
     fi
 done
 
+# ── CLAUDE.md (copy template README as project-level context) ─
+cp "$SKILL_DIR/README.md" "$PROJECT_DIR/CLAUDE.md"
+
 # ── script.md ─────────────────────────────────────────────────
 cat > "$PROJECT_DIR/script.md" << EOF
 # $TITLE
@@ -788,7 +791,7 @@ if [ -n "$VOICE_REF" ]; then
     echo "  (already set in generate_narration.py)"
 else
     echo "  next step: record a voice reference"
-    echo "    ../math-youtuber-skill/record-reference.sh $PROJECT_DIR/clips"
+    echo "    ../math-youtuber-template/record-reference.sh $PROJECT_DIR/clips"
 fi
 
 echo ""
