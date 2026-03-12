@@ -27,6 +27,7 @@ then follow the pipeline below.
 | f5-tts-mlx | voice cloning/synthesis on apple silicon | `pip install f5-tts-mlx` |
 | ffmpeg | audio/video compositing, format conversion | `brew install ffmpeg` |
 | sox | audio recording from terminal | `brew install sox` |
+| mlx-whisper | word-level transcription for timing sync | `pip install mlx-whisper` |
 
 `init.sh` creates a `.venv` and installs the python dependencies for you.
 
@@ -42,6 +43,7 @@ my-video/
 ├── generate_narration.py      # f5-tts batch generation with explicit durations
 ├── timed_scenes.py            # manim scenes, one class per segment (landscape)
 ├── timed_scenes_shorts.py     # same scenes adapted for 9:16 vertical
+├── transcribe_timing.py       # whisper-based voiceover timing analysis
 ├── voiceover.sh               # record yourself, composite, check durations
 ├── clips/                     # audio
 │   ├── my_voice_ref.wav           # raw mic recording
@@ -227,7 +229,7 @@ edit `timed_scenes.py` — one scene class per segment, durations from DUR dict.
 - `DUR` dict at top — durations defined once, referenced by descriptive key
 - elapsed time tracking in comments — `self.wait(max(d - elapsed, 0.1))` at end
 - scene naming: `S01_Intro`, `S03_Square` — number prefix for order, name for content
-- **sync visuals to narration** — use the class docstring to write out the spoken text with `|` delimiters between phrases. estimate when each phrase lands (~2.5 words/sec for TTS) and place `self.wait()` calls so animations fire at the right moment. the goal is that each visual appears as the viewer hears it described, not before or after. if you are recording your own voiceover, speaking pace will vary — treat 2.5 w/s as a starting estimate and adjust based on actual recorded durations
+- **sync visuals to narration** — use the class docstring to write out the spoken text with `|` delimiters between phrases. for TTS, estimate when each phrase lands (~2.5 words/sec) and place `self.wait()` calls accordingly. for voiceover, use `transcribe_timing.py` (step 6b) to get exact word timestamps, then use `CUE_*` constants: `self.wait(max(CUE - elapsed - run_time, 0.1))`. this ensures each visual appears as the viewer hears it described
 
 ### step 5: render animations
 
@@ -298,6 +300,53 @@ edit `timed_scenes.py` — one scene class per segment, durations from DUR dict.
 
 voiceover files (`vo_*.wav`) take priority over TTS during compositing. only re-record segments you want to replace.
 
+### step 6b: sync animations to voiceover with whisper
+
+when you record voiceover at your natural pace, the animations (timed to TTS estimates) will be out of sync. `transcribe_timing.py` uses whisper to extract word-level timestamps from your recordings, so you can place animations exactly where you say the corresponding words.
+
+```bash
+# transcribe a segment, find when key phrases are spoken
+python transcribe_timing.py 02 --phrases "identity function" "abstraction" "application"
+```
+
+output:
+
+```
+  --- phrase cue points ---
+   18.18s  "variables"
+   22.12s  "abstraction"
+   30.62s  "application"
+   41.24s  "identity function"
+```
+
+then use these as `CUE_*` constants in `timed_scenes.py`:
+
+```python
+def construct(self):
+    d = DUR["lambda"]
+    elapsed = 0.0
+
+    # ... earlier animations ...
+
+    # "abstraction" @ 22.1s — animation appears as you say the word
+    CUE_ABSTRACTION = 22.1
+    self.wait(max(CUE_ABSTRACTION - elapsed - 0.5, 0.1))
+    elapsed = CUE_ABSTRACTION - 0.5
+    self.play(FadeIn(abs_group), run_time=0.5)
+    elapsed += 0.5
+```
+
+the pattern: `self.wait(max(CUE - elapsed - run_time, 0.1))` ensures the animation lands exactly when the cue word is spoken. re-render, re-composite, and the visuals will be in sync with your voice.
+
+**workflow loop:**
+1. `./voiceover.sh record` — record at your natural pace
+2. `./voiceover.sh durations` — check duration mismatches, adjust `DUR` values
+3. `python transcribe_timing.py 02 --phrases "key phrase"` — find cue points
+4. update `CUE_*` constants in `timed_scenes.py`
+5. `./render.sh -ql S02_Lambda` — re-render
+6. `./voiceover.sh composite` — check the result
+7. repeat 3-6 as needed
+
 ### step 7: composite and concatenate
 
 ```bash
@@ -367,6 +416,12 @@ self.play(obj.animate.set_fill(GREEN, opacity=0.8))         # color change
 - **reference audio must be 24kHz mono** — model hard-errors on anything else
 - **8-12 seconds of clean reference** — more isn't better (model clips at 12s)
 
+### whisper (transcribe_timing.py)
+- **use `--phrases` for targeted lookup** — transcribing a full segment dumps hundreds of words. `--phrases` scans for multi-word matches and prints just the cue points you need
+- **whisper hallucinates in silence** — if your recording has trailing silence, whisper fills it with repeated words (e.g. "Ash Ash Ash..."). this is harmless — the real speech timestamps are accurate, just ignore the tail
+- **model downloads on first run** — `mlx-community/whisper-large-v3-turbo` is ~1.5GB. first transcription takes longer while it fetches the model
+- **partial matches** — if a phrase isn't found verbatim (e.g. you said "the abstraction" but searched for "abstraction"), the tool falls back to single-word partial matching
+
 ### manim
 - **always specify scene names when rendering** — `manim render -ql timed_scenes.py` without a scene name triggers an interactive prompt that breaks automation. render each scene explicitly in a loop
 - **one scene class per segment** — much easier to time than monolithic scenes
@@ -395,5 +450,5 @@ self.play(obj.animate.set_fill(GREEN, opacity=0.8))         # color change
 - **iterate at 8 steps / `-ql`** — 5-10x faster than production. check timing before committing
 - **script is the single source of truth** — all other files derive from it
 - **voice reference recording matters** — the AI clones cadence and energy, not just timbre
-- **line up visuals with narration** — animations should appear in sync with the words describing them. if you say "square both sides" while the equation is already on screen, it feels disconnected. time `self.play()` calls to land with the spoken cues
+- **line up visuals with narration** — animations should appear in sync with the words describing them. if you say "square both sides" while the equation is already on screen, it feels disconnected. for voiceover, use `transcribe_timing.py` to get exact word timestamps and drive animation timing with `CUE_*` constants rather than guessing
 - **abrupt audio cuts between segments are jarring** — each TTS segment starts cold, so back-to-back segments can sound choppy. use brief pauses (0.3-0.5s silence) between segments in concatenation, and keep vocal energy consistent across segments by using the same reference audio and cfg_strength
