@@ -1,0 +1,43 @@
+schema_version = 1
+
+[project]
+id = "__PROJECT_ID__"
+title = __TITLE_TOML__
+slug = "__SLUG__"
+
+[settings]
+speech_wpm = 150
+lead_in_seconds = 0.6
+tail_seconds = 0.35
+default_profile = "draft"
+
+[voice]
+model = "mlx-community/whisper-large-v3-turbo"
+revision = "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb"
+language = "en"
+
+[profiles.draft]
+manim_quality = "-ql"
+width = 854
+height = 480
+fps = 15
+video_crf = 25
+
+[profiles.review]
+manim_quality = "-qm"
+width = 1280
+height = 720
+fps = 30
+video_crf = 21
+
+[profiles.final]
+manim_quality = "-qh"
+width = 1920
+height = 1080
+fps = 60
+video_crf = 18
+
+[tool]
+chalk_version = __CHALK_VERSION_TOML__
+source_commit = __CHALK_COMMIT_TOML__
+source_tree = __CHALK_TREE_TOML__

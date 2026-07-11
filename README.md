@@ -1,434 +1,293 @@
-# chalk
+# Chalk
 
-collaborate on scripted math explainer videos entirely from the command line on macOS.
-no GUI editors, no drag-and-drop timelines — just python, ffmpeg, and a microphone.
+Chalk is an AI-native workspace for scripted math and technical explainer
+videos. You shape the explanation in conversation with coding agents; everyone
+works in ordinary Markdown and Python; Chalk quietly remembers which script,
+scene, recording, transcript, and settings produced each cut.
 
-## quick start
+It uses the tools that already work well:
+
+- Manim for expressive visual code;
+- SoX for human voice recording;
+- MLX Whisper for word timing;
+- ffmpeg for composition and delivery;
+- Git for human history;
+- SHA-256 for exact artifact lineage and incremental reuse.
+
+Chalk does not introduce a visual DSL, editor database, or required UI. Its job
+is to shorten the distance from an idea to a watched A/V cut without losing the
+history of how that cut came to be.
+
+## Start a video
+
+Install or clone Chalk once, then create each video as its own repository:
 
 ```bash
-# clone chalk
-git clone <your-chalk-repo-url> my-video
-cd my-video
-
-# set up environment (venv, system deps, directories)
+git clone https://github.com/SamuelSchlesinger/chalk.git
+cd chalk
+./chalk new ../my-video --title "My video"
+cd ../my-video
 ./setup.sh
-
-# activate venv and start working
-source .venv/bin/activate
 ```
 
-edit outline.md, script.md, and timed_scenes.py for your video, then follow the pipeline below.
+The first setup resolves transitive Python dependencies into
+`requirements.lock`; commit that file. Later setups install the lock. MathTex
+also needs a local LaTeX distribution with `dvisvgm`.
 
-## toolchain
+`chalk new` copies a pinned project-local tool, initializes a fresh Git history,
+and records the Chalk version used. It does not carry Chalk's origin or commit
+history into the video project.
 
-| tool | purpose | install |
-|------|---------|---------|
-| manim CE | math/diagram animations | `pip install manim` + `brew install ffmpeg cairo pango` + LaTeX |
-| ffmpeg | audio/video compositing, format conversion | `brew install ffmpeg` |
-| sox | audio recording from terminal | `brew install sox` |
-| mlx-whisper | word-level transcription for timing sync | `pip install mlx-whisper` |
+Run `./chalk` at any time. It reports what exists, what is stale, open feedback,
+and the most useful next action.
 
-`setup.sh` creates a `.venv` and installs the python dependencies for you.
+Run `./chalk open` for the local project room: the current full cut and segment
+cuts, production readiness, take/timing freshness, approvals, exact revisions,
+and timecoded review notes in one video-centered view. Segment notes bind to a
+segment cut; notes made while the full cut is playing bind to the assembled
+artifact and its global timecode.
 
-## project structure
+## The files you author
 
-```
-my-video/
-├── CLAUDE.md                  # agent guidance (read by Claude Code)
-├── README.md                  # you are here
-├── setup.sh                   # run once to set up environment
-├── render.sh                  # render all scenes (handles quality + shorts)
-├── voiceover.sh               # record yourself, composite, check durations
-├── transcribe_timing.py       # whisper-based voiceover timing analysis
-├── outline.md                 # collaborative outline — intellectual arc and structure
-├── script.md                  # co-authored script — single source of truth for production
-├── timed_scenes.py            # manim scenes, one class per segment (landscape)
-├── timed_scenes_shorts.py     # same scenes adapted for 9:16 vertical
-├── clips/                     # audio
-│   ├── vo_01_intro.wav            # voiceover recordings
-│   └── ...
-├── output/                    # final product
-│   ├── segments/                  # individual composited segments
-│   ├── final.mp4                  # the final video
-│   └── shorts/                    # shorts version (1080x1920)
-│       ├── segments/
-│       └── final_shorts.mp4
-├── media/                     # manim output (auto-generated)
-└── .venv/                     # python virtual environment
+```text
+brief.md                 audience, promise, constraints, target length
+outline.md               intellectual arc
+script.md                cohesive read-through, direction, visual notes
+scenes/<segment-id>.py   ordinary Manim, one independent file per segment
+style.py                 genuinely shared palette and helpers
+feedback.md              durable review observations and decisions
+context/                 pinned excerpts from reference videos
 ```
 
-## end-to-end pipeline
+The rest is supporting memory:
 
-### step 0: outline the video
+```text
+chalk.toml               small project/render configuration
+media/takes/             immutable accepted recordings, addressed by hash
+transcripts/             word timings tied to exact recordings and model
+.chalk/state.json        one selected take and optional approval per segment
+.chalk/snapshots/        content-addressed project closures
+.chalk/cache/            ignored local render/mux action cache
+output/                  ignored convenient aliases to current cuts
+releases/                named release manifests and optional masters
+```
 
-work together — human and AI — on `outline.md`. this is where the video's intellectual structure gets worked out before anyone writes spoken lines or animation cues.
+### Stable segments without a registry
 
-the outline takes whatever shape the video needs. a pedagogical blueprint with numbered sections and pacing notes. a narrative arc with bullet points tracing a personal journey. a proof skeleton with key lemmas and visual ideas. don't force a format — let the content dictate the structure.
-
-what the outline should answer:
-- what should the viewer understand after watching?
-- what's the intellectual arc — where do we start, where do we end?
-- what are the segments, roughly, and what does each one accomplish?
-- how long is the video?
-
-**duration estimation:** word count / 2.5 ≈ speech duration in seconds at natural pace. use actual recorded durations as feedback and adjust timing accordingly.
-
-| words | duration | good for |
-|-------|----------|----------|
-| 10-15 | 4-6s | titles, transitions, one-liners |
-| 20-30 | 8-12s | single concept + animation |
-| 30-40 | 12-16s | multi-step explanation |
-| 40-50 | 16-20s | algebraic walkthrough, complex diagrams |
-
-### step 1: write the script
-
-with the outline as a guide, collaboratively draft `script.md`. human and AI each write sections, then edit each other's work, going back and forth until the voice is right. the human's voice is the critical value add — anyone can ask an AI for their video ideas, so the distinctive perspective and editorial judgment of the human author is what makes the video worth watching.
-
-**the author-review-revise loop:** iterate on the script until it reaches a fixed point — accurate, high quality, and meeting the author's goals. the AI should fact-check its own contributions (definitions, theorem statements, attributions, dates) and flag anything it's uncertain about. the human reviews for voice, correctness, and whether the explanation actually lands. revise, re-review, repeat. the script is done when neither party has changes to make.
-
-interleave three kinds of content in `script.md`:
-
-- **spoken lines** — plain text, lowercase, precise
-- **`> [MANIM:]` cues** — what animation plays during this section
-- **`> [DIRECTOR:]` notes** — performance direction
-
-here's an example from a proof that sqrt(2) is irrational:
+Every `##` script section has one unobtrusive stable ID:
 
 ```markdown
-## square both sides
+## Square both sides
+<!-- chalk:segment square-both-sides -->
 
-> **[DIRECTOR: walk through the algebra one step at a time.]**
+Square both sides. Two equals alpha squared over beta squared.
 
-square both sides. two equals alpha squared over beta squared. multiply through: alpha squared equals two beta squared.
-
-> **[CUT TO MANIM: S03_Square scene]** show the algebra step by step:
-> sqrt(2) = α/β -> 2 = α²/β² -> α² = 2β²
+> **[VISUAL]** Transform the equation one step at a time.
 ```
 
-#### voice and tone
+The heading and order can change. The ID stays put and joins that prose to
+`scenes/square-both-sides.py`, its recordings, feedback, and artifacts. There
+is no Bash array, numbered class, duration dictionary, or audio stem to keep in
+sync.
 
-the goal is **clarity with flair** — not hype. the best math communication lets the ideas do the work. and the best scripts read like someone thinking out loud at a whiteboard, not like a textbook being read aloud.
+## The normal loop
 
-##### what good script voice sounds like
+### 1. Brief, outline, and context
 
-- **build ideas step by step.** don't front-load a definition and then explain it. introduce each piece as you need it, so the viewer follows the thought process. "a category consists of four things. there are the objects... there are the morphisms... there is also a composition rule..." reads better than "a category is a collection of objects, morphisms, a composition rule, and identity morphisms satisfying two laws."
-- **use "you", "we", "our" naturally.** the viewer is in the room with you. "suppose you have a morphism f from A to B" is warmer than "let f: A → B be a morphism." "our first example is Set" beats "the first example is Set."
-- **weave examples alongside abstractions.** don't state the full abstract definition and then give examples. interleave them. state part of the definition, show what it looks like in a concrete case, then continue.
-- **connect ideas to what came before.** "now that we have the definition of a category, we can say what it means for two objects to be the same" is better than jumping to "a morphism f is an isomorphism if..." Narrate your thought process — why are we talking about this next?
-- **vary sentence length.** short declarative sentences mixed with longer explanatory ones. a paragraph of uniform long sentences reads like a textbook. a paragraph of all short sentences feels choppy.
-- **let the math carry the weight.** if you've explained a concept well, you don't need to tell the viewer it's interesting. the explanation does that work.
-
-bad: "a functor F from C to D sends each object in C to an object in D, and each morphism in C to a morphism in D. there are two conditions."
-good: "we have categories — objects, morphisms, composition, identities. the next question is how different categories relate to each other. the answer is a functor. a functor F from a category C to a category D does two things. it sends each object in C to an object in D, and it sends each morphism in C to a morphism in D. but it can't send them arbitrarily — it has to respect the structure."
-
-##### ground rules
-
-- **explain, don't sell.** if a result is beautiful, say why — don't just say "and here's where it gets wild."
-- **be precise.** use correct terminology and define it. vagueness isn't accessible, it's confusing.
-- **earn the wonder.** set up a concept carefully and the moment it clicks is naturally exciting. no hype needed.
-- **cut the filler.** "so basically", "here's the thing" — these pad runtime without adding understanding.
-- **lowercase is fine, but don't force casualness.** "this gives us injectivity" is better than "boom — injectivity."
-
-bad: "both alpha and beta are even. boom. contradiction."
-good: "both alpha and beta are even. they share a factor of two. but we assumed they had no common factors. contradiction."
-
-bad: "congratulations, you just proved irrationality."
-good: "the square root of two is irrational."
-
-#### LLM-isms to avoid
-
-since these scripts are co-authored with AI, the AI-contributed sections tend to pick up identifiable writing tics. both the human editor and the AI should watch for these — the AI should actively avoid producing them, and the human should rewrite any that slip through. the human voice is what makes these videos worth watching over just asking the AI directly. (see [wikipedia's field guide](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing) for the full taxonomy.)
-
-**significance inflation.** LLMs love to tell the audience how important something is rather than showing why. words like "remarkable", "profound", "elegant", "pivotal", "crucial", "key" are flags. if something is remarkable, the explanation should make the viewer feel that — you shouldn't need the adjective.
-
-bad: "this is the remarkable thing: every algorithm can be expressed as a turing machine."
-good: "every algorithm ever written can be expressed as a turing machine."
-
-bad: "turing's most profound insight wasn't just the machine."
-good: "turing went further. he described a specific machine."
-
-**"not just X — Y" and other negative parallelisms.** a staple of LLM rhetoric: "not just X, but Y", "it wasn't X — it was Y", "not because X — because Y". occasionally fine, but if your script has three of them, two need to go. rewrite as direct statements.
-
-bad: "not because we lack the hardware — because no machine could solve them in principle."
-good: "no machine could solve them, regardless of speed or memory."
-
-**rule of three.** LLMs default to tripling: "every search engine, every compiler, every neural network." once in a script is fine. twice is a pattern. three times and the audience can hear the prompt.
-
-**em dash overuse.** LLMs reach for em dashes where commas, colons, periods, or parentheses would be more natural. one or two per segment is fine. if every sentence has one, restructure.
-
-**recap closings.** LLMs love to end by restating every point made in the piece ("X drew the boundary. Y showed universality. Z proved the limits."). a closing should leave the viewer with one thought, not a bulleted summary masquerading as prose.
-
-bad: "the church-turing thesis draws the boundary. the universal turing machine shows one machine can simulate them all. quantum computers push efficiency. the halting problem proves the boundary is real."
-good: end on a single image or idea that the video has earned.
-
-**rhetorical question pairs.** "but is there X? are there Y?" — LLMs use paired rhetorical questions as transitions. one question is fine. a pair, where the second rephrases the first, is filler.
-
-**AI vocabulary.** these words appear at far higher rates in LLM output than in human writing: delve, intricate, tapestry, testament, landscape (figurative), meticulous, underscore, showcase, foster, vibrant, enduring, bolster, garner, pivotal, crucial. not banned, but if you see a cluster of them, rewrite.
-
-**superficial participle tails.** sentences ending with "...representing X", "...highlighting Y", "...underscoring Z". these tack on a shallow interpretation instead of letting the fact speak. cut the participle phrase or make it its own sentence with actual content.
-
-bad: "their states become correlated, representing a departure from classical physics."
-good: "their states become correlated in ways that classical probability cannot describe."
-
-#### conventions
-
-**heading = segment boundary.** each `##` heading maps to one narration segment, one manim scene class, and one composited video file.
-
-**spoken lines are lowercase, precise.** write like you're explaining to a smart friend, then trim. these go verbatim into `voiceover.sh` as recording prompts.
-
-**naming consistency:**
-
-| file | pattern | example |
-|------|---------|---------|
-| `script.md` | `## heading` | `## square both sides` |
-| `timed_scenes.py` | `class S03_Square(Scene)` + `DUR["square"]` | class + dict key |
-| `voiceover.sh` | `"03:S03_Square:03_square:description"` | id:class:audio:desc |
-
-#### keeping files in sync
-
-the outline feeds the script, and the script feeds production:
-```
-outline.md                      ← collaborative planning
-    └── script.md               ← co-authored (single source of truth for production)
-            ├── timed_scenes.py         — animation content + durations
-            └── voiceover.sh            — segment mapping + script text
-```
-
-**when you change a spoken line:** update script.md, update SCRIPTS in voiceover.sh, re-record the segment, update DUR in timed_scenes.py if duration changed.
-
-**when you add a segment:** add to all three files. use "b" suffixes for insertions (e.g. `03b_square`).
-
-### step 2: build timed animations
-
-edit `timed_scenes.py` — one scene class per segment, durations from DUR dict.
-
-**key patterns:**
-- `DUR` dict at top — durations defined once, referenced by descriptive key
-- elapsed time tracking in comments — `self.wait(max(d - elapsed, 0.1))` at end
-- scene naming: `S01_Intro`, `S03_Square` — number prefix for order, name for content
-- **sync visuals to narration** — use the class docstring to write out the spoken text with `|` delimiters between phrases. start with word-count estimates (~2.5 words/sec) and place `self.wait()` calls accordingly. after recording voiceover, use `transcribe_timing.py` (step 4b) to get exact word timestamps, then use `CUE_*` constants: `self.wait(max(CUE - elapsed - run_time, 0.1))`. this ensures each visual appears as the viewer hears it described
-
-### step 3: render animations
+Write `brief.md` and shape the arc in `outline.md`. If an agent should learn
+from earlier videos, pin the exact material instead of relying on whatever a
+sibling directory happens to contain later:
 
 ```bash
-# all scenes, fast iteration
-./render.sh
-
-# all scenes, final quality
-./render.sh -qh
-
-# one scene
-./render.sh -ql S03_Square
-
-# quality flags:
-#   -ql  480p/15fps   fast iteration
-#   -qm  720p/30fps   review drafts
-#   -qh  1080p/60fps  final render
-#   -qk  4K/60fps     4K final
+./chalk context add ../category-theory \
+  --files outline.md script.md \
+  --label category-theory \
+  --note "voice and abstraction-to-example pacing"
 ```
 
-`render.sh` auto-discovers scene classes from `timed_scenes.py`, activates the venv, and loops through them. no need to maintain a separate scene list.
+The generated Markdown pack records source hashes and Git state and can be
+committed with the project.
 
-### step 3b: render shorts animations (optional)
+### 2. Script and visuals in parallel
 
-`timed_scenes_shorts.py` is adapted for the 9:16 vertical frame. adapt each scene from `timed_scenes.py` with layout changes for the narrow vertical frame.
+The script stays in one file so it can be read and edited as a whole. Visual
+work is split by stable segment, so agents can work independently:
 
-```bash
-# all shorts scenes
-./render.sh --shorts -qh
-
-# one shorts scene
-./render.sh --shorts -ql S03_Square
+```text
+script.md
+scenes/intro.py
+scenes/square-both-sides.py
+scenes/closing.py
 ```
 
-`render.sh --shorts` handles the `-r 1080,1920 --fps 60` flags automatically.
+Use `./chalk segment add "Square both sides"` when convenient, or edit the
+Markdown and Python directly. `./chalk check` explains missing IDs/scenes and
+literal cue phrases that no longer occur in the narration.
 
-**key layout differences from landscape:**
+### 3. Watch before recording
 
-| property | landscape (16:9) | shorts (9:16) |
-|----------|-----------------|---------------|
-| frame width | ~14.2 units | ~4.5 units |
-| frame height | 8 units | 8 units |
-| font sizes | 48-96 | 72-192 (~2x) |
-| horizontal layout | side-by-side ok | stack vertically |
-| vertical spacing | 0.6-0.8 buff | 0.8-1.0 buff (large text needs room) |
-
-**common pitfalls:**
-- `-r` flag is **height,width** not width,height — `-r 1080,1920` gives 1080w x 1920h
-- wide equations (e.g. `\gcd(\alpha, \beta) = 1`) may overflow — split across lines or reduce font size
-- elements placed with `LEFT * 2` / `RIGHT * 2` are near the frame edge (frame is only ±2.25 wide)
-- test with `-ql` first — vertical rendering is the same speed as landscape
-
-### step 4: record voiceover
-
-```bash
-# record all segments (video autoplays while you speak)
-./voiceover.sh record
-
-# record just one segment
-./voiceover.sh record 05
-
-# record from segment 05 onwards (skipping earlier segments)
-./voiceover.sh record-from 05
-
-# check duration mismatches
-./voiceover.sh durations
-
-# preview a segment's animation
-./voiceover.sh play 05
-```
-
-only re-record segments you want to replace.
-
-### step 4b: sync animations to voiceover with whisper
-
-when you record voiceover at your natural pace, the animations (timed to word-count estimates) will be out of sync. `transcribe_timing.py` uses whisper to extract word-level timestamps from your recordings, so you can place animations exactly where you say the corresponding words.
-
-```bash
-# transcribe a segment, find when key phrases are spoken
-python transcribe_timing.py 02 --phrases "identity function" "abstraction" "application"
-```
-
-output:
-
-```
-  --- phrase cue points ---
-   18.18s  "variables"
-   22.12s  "abstraction"
-   30.62s  "application"
-   41.24s  "identity function"
-```
-
-then use these as `CUE_*` constants in `timed_scenes.py`:
+Scene code uses phrases rather than copied timestamps:
 
 ```python
-def construct(self):
-    d = DUR["lambda"]
-    elapsed = 0.0
+from manim import *
+from chalk_runtime import ChalkScene
 
-    # ... earlier animations ...
 
-    # "abstraction" @ 22.1s — animation appears as you say the word
-    CUE_ABSTRACTION = 22.1
-    self.wait(max(CUE_ABSTRACTION - elapsed - 0.5, 0.1))
-    elapsed = CUE_ABSTRACTION - 0.5
-    self.play(FadeIn(abs_group), run_time=0.5)
-    elapsed += 0.5
+class Visual(ChalkScene):
+    def construct(self):
+        equation = MathTex(r"\sqrt{2} = \alpha / \beta")
+        squared = MathTex(r"2 = \alpha^2 / \beta^2")
+
+        self.play_on("square both sides", FadeIn(equation), lead=0.2)
+        self.land_on("two equals alpha squared", Transform(equation, squared))
+        self.finish()
 ```
 
-the pattern: `self.wait(max(CUE - elapsed - run_time, 0.1))` ensures the animation lands exactly when the cue word is spoken. re-render, re-composite, and the visuals will be in sync with your voice.
-
-**workflow loop:**
-1. `./voiceover.sh record` — record at your natural pace
-2. `./voiceover.sh durations` — check duration mismatches, adjust `DUR` values
-3. `python transcribe_timing.py 02 --phrases "key phrase"` — find cue points
-4. update `CUE_*` constants in `timed_scenes.py`
-5. `./render.sh -ql S02_Lambda` — re-render
-6. `./voiceover.sh composite` — check the result
-7. repeat 3-6 as needed
-
-### step 5: composite and concatenate
+Before a recording exists, Chalk estimates word timing from the narration. This
+makes the early animatic useful while script and visual work are still happening:
 
 ```bash
-# composite landscape
-./voiceover.sh composite
-
-# composite shorts (uses same audio, different video from timed_scenes_shorts)
-./voiceover.sh composite-shorts
+./chalk watch square-both-sides
 ```
 
-the composite step:
-1. pairs each animation + audio into a segment video
-2. handles audio longer than video (freezes last frame via tpad)
-3. concatenates all segments
-4. applies 2-pass YouTube loudnorm (-14 LUFS, -1 dBTP)
+Only the requested segment must be healthy. Incomplete later scenes do not block
+local iteration.
 
-## manim reference
+### 4. Record, align, and immediately review A/V
 
-### useful primitives
-
-- `MathTex(r"...")` — LaTeX math (no kerning issues). `{{ }}` double braces for sub-part morphing
-- `Text("...", font_size=48)` — plain text. default font works at font_size >= 24 (see fonts section below)
-- `Arrow(start, end)` — animate with `GrowArrow()`
-- `Graph(vertices, edges, layout=...)` — network graphs
-- `SurroundingRectangle(obj)` — highlight box
-- `VGroup(a, b, c)` — group for collective animation
-
-### fonts
-
-MathTex renders through LaTeX and is immune to kerning bugs. Text() renders through Pango/Cairo and has a known kerning bug at small font sizes (< 24) where letters bunch together. The default font works well at font_size >= 24; only pass `font=` explicitly if you encounter kerning issues at a specific size.
-
-```python
-# defined at the top of timed_scenes.py
-FONT_MONO = "Courier New"    # code snippets, labels — ships with macOS
-
-# usage
-Text("hello", font_size=48, color=WHITE)
-Text("x = 42", font=FONT_MONO, font_size=36, color=GREEN)
-MathTex(r"\sqrt{2}")  # no font= needed, uses LaTeX
+```bash
+./chalk record square-both-sides
 ```
 
-Rules:
-- use `MathTex(r"\text{...}")` instead of `Text()` when font_size < 24
-- if you see kerning issues at a specific size, pass `font="Helvetica"` (or another tested sans-serif) to that `Text()` call
-- Courier New ships with macOS. if you install additional fonts, JetBrains Mono is a good monospace upgrade
+A kept performance is converted to lossless audio, stored under its SHA-256,
+bound to the exact narration revision, transcribed, used to resolve phrase cues,
+and played back with the newly built visual. Rerecording never overwrites the
+previous take. Rejected scratch recordings never change the selected take.
 
-### animation patterns
+You can also import an existing recording:
 
-```python
-self.play(FadeIn(obj), run_time=0.5)
-self.play(obj.animate.move_to(RIGHT * 3), run_time=0.8)
-self.play(TransformMatchingTex(eq1, eq2))
-self.play(Flash(obj, color=RED, flash_radius=0.5))
-self.play(FadeIn(a), GrowArrow(b), run_time=0.6)           # simultaneous
-self.play(obj.animate.set_fill(GREEN, opacity=0.8))         # color change
+```bash
+./chalk take import square-both-sides path/to/take.wav --select
+./chalk transcribe square-both-sides
+./chalk review square-both-sides
 ```
 
-### rendering quality flags
+Natural performance differences are expected. Chalk aligns script tokens to
+Whisper words rather than requiring an exact transcript. A spoken-line edit
+marks the old take stale; a director-note edit does not.
 
-| flag | resolution | fps | use case |
-|------|-----------|-----|----------|
-| `-ql` | 854x480 | 15 | fast iteration |
-| `-qm` | 1280x720 | 30 | review drafts |
-| `-qh` | 1920x1080 | 60 | final render |
-| `-qk` | 3840x2160 | 60 | 4K final |
+### 5. Make feedback durable
 
-## lessons learned
+During review, capture the actual observation and timecode:
 
-### whisper (transcribe_timing.py)
-- **use `--phrases` for targeted lookup** — transcribing a full segment dumps hundreds of words. `--phrases` scans for multi-word matches and prints just the cue points you need
-- **whisper hallucinates in silence** — if your recording has trailing silence, whisper fills it with repeated words (e.g. "Ash Ash Ash..."). this is harmless — the real speech timestamps are accurate, just ignore the tail
-- **model downloads on first run** — `mlx-community/whisper-large-v3-turbo` is ~1.5GB. first transcription takes longer while it fetches the model
-- **partial matches** — if a phrase isn't found verbatim (e.g. you said "the abstraction" but searched for "abstraction"), the tool falls back to single-word partial matching
+```bash
+./chalk note add square-both-sides \
+  --at 12.4 --category visual --severity bug \
+  "the denominator clips the frame before the transform"
+```
 
-### manim
-- **keep `Text()` font_size ≥ 24** — Manim's `Text` class has a known kerning bug where small font sizes cause letters to bunch together with uneven spacing. this is especially visible at 1080p. `MathTex` is not affected. if you need small text, use `MathTex(r"\text{...}")` instead. if you encounter kerning issues at larger sizes, pass `font="Helvetica"` explicitly
-- **use VISUAL_DELAY** — start each scene with `self.wait(VISUAL_DELAY)` (typically 1.5s) so the first visual has a moment to appear before narration begins. include VISUAL_DELAY in each DUR value and update DUR to match actual voiceover durations after recording
-- **always specify scene names when rendering** — `manim render -ql timed_scenes.py` without a scene name triggers an interactive prompt that breaks automation. render each scene explicitly in a loop
-- **one scene class per segment** — much easier to time than monolithic scenes
-- **networkx layouts are 2d, manim wants 3d** — convert with `{k: [v[0], v[1], 0] for k, v in layout.items()}`
-- **`Text` submobjects are SVG paths, not characters** — use `save_state()` + `Restore()` for scatter-assemble
-- **track elapsed time in comments** — `self.wait(max(target - elapsed, 0.1))` ensures exact duration
-- **manim caches aggressively** — if you edit a scene file and re-render, manim may serve the old cached video. delete the output `.mp4` file before re-rendering to force a fresh build. `--flush_cache` alone may not be enough
-- **`-r` flag changes the output directory** — `-r 1080,1920 -ql` renders to `1920p15/` not `480p15/`. the custom resolution overrides the quality preset's resolution but keeps its fps. always check the actual output path after rendering with `-r`
-- **fade out elements before replacing them** — when transitioning between scene phases, explicitly `FadeOut` text and labels that will be replaced. leaving them on screen (even if partially obscured) causes visual clutter, especially in the narrow 9:16 frame
+The note is appended to readable `feedback.md` and bound to the exact snapshot
+and cut under discussion. Agents may edit the task list directly. Resolve it
+only after checking the repaired A/V:
 
-### ffmpeg / compositing
-- **`-shortest` clips video endings** — when video is longer than audio (due to VISUAL_DELAY), `-shortest` trims the video, cutting off fade-out animations. fix: add `apad` to the audio filter chain (`-af "apad,loudnorm=..."`) to pad audio with silence to match video length
-- **never use `seq`/`printf` with 08, 09** — bash interprets as invalid octal. hardcode the list
-- **re-encode at both stages** — per-segment and final concat. `-c copy` causes playback freezing
-- **tpad for audio > video** — `tpad=stop_mode=clone:stop_duration=N` freezes last frame. do NOT use `-stream_loop`
-- **2-pass loudnorm for YouTube** — measure first, then encode with measured values + `linear=true`
+```bash
+./chalk note resolve n_ab12cd --resolution "reflowed the fraction and checked draft cut"
+```
 
-### shorts (9:16 vertical)
-- **`-r` is height,width** — `manim render -r 1080,1920` gives 1080w x 1920h. getting this backwards gives landscape at a weird resolution
-- **double your font sizes** — phone screens are small. text that's readable at 48pt on a laptop needs ~96pt for shorts
-- **stack, don't spread** — the frame is only ~4.5 units wide. anything side-by-side in landscape should be stacked vertically
-- **increase vertical spacing** — larger text takes more room. use `buff=0.8-1.0` instead of `0.6-0.8`
-- **watch for overlap** — fractions (`\frac{}{}`) are tall. increase `UP/DOWN` shifts between equations
-- **same audio, different video** — `composite-shorts` reuses the same voiceover clips with the shorts-rendered video
+This captures the useful delta from an agent conversation without archiving the
+whole conversation.
 
-### workflow
-- **iterate at `-ql`** — much faster than production quality. check timing before committing
-- **outline feeds script, script feeds production** — the outline is where intellectual structure gets worked out collaboratively; the script is the single source of truth for all production files
-- **line up visuals with narration** — animations should appear in sync with the words describing them. if you say "square both sides" while the equation is already on screen, it feels disconnected. use `transcribe_timing.py` to get exact word timestamps and drive animation timing with `CUE_*` constants rather than guessing
+### 6. Review locally, then as a whole
+
+```bash
+./chalk review square-both-sides
+./chalk review --full --profile review
+```
+
+Segment review catches timing and visual defects early. Full review is for
+transitions, global pacing, and whether the intellectual arc actually knits
+together.
+
+### 7. Snapshot, checkpoint, and release
+
+```bash
+./chalk snapshot recording-candidate
+./chalk checkpoint rough-cut-3
+./chalk release v1
+```
+
+A snapshot is a content-addressed closure of the exact brief, outline, script
+facets, scenes, style/assets, context, selected takes, transcripts, build
+recipes, and environment. A checkpoint additionally makes an intentional Git
+commit. A release performs stricter completeness checks and writes a portable
+release manifest beside the master.
+
+Git explains *why and when* authored work changed. Content hashes explain
+*exactly which versions* were joined into a particular cut.
+
+## Commands
+
+The human loop is deliberately small:
+
+```text
+./chalk                         status and suggested next action
+./chalk watch [segment]         rebuild changed proxy and play it
+./chalk record [segment]        immutable take through immediate A/V review
+./chalk review [segment]        review a segment or --full video
+./chalk open                    open the local video/project room
+./chalk release <name>          strict final build and release record
+```
+
+Supporting commands:
+
+```text
+./chalk new PATH                create an independent project
+./chalk check [segment...]      validate only the requested source closure
+./chalk segment add TITLE       add stable script/scene pair
+./chalk render [segment...]     render without opening a player
+./chalk take ...                import, select, and inspect immutable takes
+./chalk transcribe [segment...] cache word timings for selected takes
+./chalk note ...                add/list/resolve timecoded feedback
+./chalk approve [segment...]    bind approval to current content
+./chalk context ...             pin exact reference material
+./chalk snapshot [name]         write a content-addressed closure
+./chalk trace [ref]             inspect lineage when needed
+./chalk doctor                  inspect local tools and locks
+```
+
+Human-readable output is the default. Commands that support automation also
+offer JSON output.
+
+## Speed and cache correctness
+
+Each derived operation has an immutable action key. The render key includes the
+segment scene, shared helpers/assets, resolved timing, explicit profile, recipe,
+and relevant tool versions. The mux key includes that render and exact selected
+audio. The full-cut key includes the ordered segment cuts.
+
+Consequences:
+
+- changing one scene rebuilds one scene and its downstream cut;
+- changing shared style invalidates every scene that conservatively depends on it;
+- a retake rebuilds that transcript/timeline/scene/mux and the full cut;
+- reordering segments rebuilds only the full cut;
+- warm no-op commands verify and reuse their result;
+- output paths never determine freshness;
+- Manim's own cache cannot return a render from a different Chalk action.
+
+Draft profiles are optimistic and allow estimated timing or silence. Release is
+strict about missing source media, structural errors, blocking feedback, hashes,
+and environment locks. Provenance remains ambient until `trace` or release.
+
+## Design rationale
+
+The previous Chalk template proved that agents are already good at Markdown,
+Python, and Manim. Chalk2 proved that stable IDs, immutable takes, explicit
+targets, phrase cues, and incremental composition are useful—but also that a
+custom renderer, verbose visual interchange format, and user-visible provenance
+machinery can displace the creative work.
+
+This version keeps the invariants and removes the ceremony. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the precise boundary and
+[`docs/CRAFT.md`](docs/CRAFT.md) for reusable writing, visual, audio, and review
+lessons carried forward from actual production.

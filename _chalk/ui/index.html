@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Chalk project room</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#theater">Skip to current cut</a>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-lockup" aria-label="Chalk project room">
+          <span class="brand-mark" aria-hidden="true">C</span>
+          <span class="brand-name">chalk</span>
+          <span class="brand-divider" aria-hidden="true"></span>
+          <div>
+            <p class="eyebrow">Project room</p>
+            <h1 id="project-title">Loading project…</h1>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <div
+            class="build-state"
+            id="build-state"
+            data-state="working"
+            role="status"
+            aria-live="polite"
+          >
+            <span class="state-dot" aria-hidden="true"></span>
+            <span id="build-label">Reading project</span>
+          </div>
+          <button class="quiet-button" id="refresh-button" type="button">
+            Refresh
+          </button>
+        </div>
+      </header>
+
+      <aside class="sequence-panel" aria-label="Video sequence">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">The cut</p>
+            <h2>Sequence</h2>
+          </div>
+          <span class="count-pill" id="segment-count">0</span>
+        </div>
+
+        <button
+          class="full-cut-button"
+          id="full-cut-button"
+          type="button"
+          aria-pressed="false"
+        >
+          <span>
+            <strong>Full rough cut</strong>
+            <small id="full-cut-detail">No assembled cut yet</small>
+          </span>
+          <span class="play-glyph" aria-hidden="true">▶</span>
+        </button>
+
+        <nav class="segment-list" id="segment-list" aria-label="Segments"></nav>
+
+        <div class="overall-progress">
+          <div class="progress-copy">
+            <span>Project readiness</span>
+            <strong id="overall-percent">0%</strong>
+          </div>
+          <div
+            class="progress-track"
+            role="progressbar"
+            aria-label="Project readiness"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+            id="overall-progress"
+          >
+            <span></span>
+          </div>
+          <p id="next-action">The next useful action will appear here.</p>
+        </div>
+      </aside>
+
+      <main class="workspace" id="theater">
+        <section class="theater-card" aria-labelledby="now-showing-title">
+          <div class="theater-heading">
+            <div>
+              <p class="eyebrow" id="now-showing-label">Now showing</p>
+              <h2 id="now-showing-title">Choose a segment</h2>
+            </div>
+            <div class="artifact-meta" id="artifact-meta"></div>
+          </div>
+
+          <div class="video-frame" id="video-frame">
+            <video
+              id="review-video"
+              controls
+              preload="metadata"
+              aria-label="Current project cut"
+            ></video>
+            <div class="empty-video" id="empty-video">
+              <span class="empty-mark" aria-hidden="true">○</span>
+              <strong>No current cut</strong>
+              <p>The scene can still be inspected while its next proxy builds.</p>
+            </div>
+            <div class="timecode-badge" id="timecode-badge">00:00.0</div>
+          </div>
+
+          <div class="review-toolbar">
+            <div class="view-switch" role="group" aria-label="Review view">
+              <button
+                class="active"
+                id="segment-view-button"
+                type="button"
+                aria-pressed="true"
+              >
+                Segment
+              </button>
+              <button id="full-view-button" type="button" aria-pressed="false">
+                Full cut
+              </button>
+            </div>
+            <div class="review-summary" id="review-summary">
+              <span>Waiting for project state</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="runway" aria-labelledby="runway-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">At a glance</p>
+              <h2 id="runway-title">Review runway</h2>
+            </div>
+            <div class="legend" aria-label="Status legend">
+              <span><i class="ready"></i> current</span>
+              <span><i class="working"></i> in progress</span>
+              <span><i class="attention"></i> feedback</span>
+            </div>
+          </div>
+          <div class="runway-track" id="runway-track"></div>
+        </section>
+      </main>
+
+      <aside class="inspector" aria-label="Selected segment details">
+        <div class="inspector-scroll">
+          <section class="inspector-section segment-summary">
+            <p class="eyebrow" id="inspector-scope-label">Selected segment</p>
+            <div class="segment-title-line">
+              <span class="segment-index" id="selected-index">—</span>
+              <div>
+                <h2 id="selected-title">Nothing selected</h2>
+                <p id="selected-id">Select a segment from the sequence.</p>
+              </div>
+            </div>
+            <p class="narration-preview" id="narration-preview"></p>
+          </section>
+
+          <section class="inspector-section">
+            <div class="section-heading compact">
+              <div>
+                <p class="eyebrow">Readiness</p>
+                <h3>Production state</h3>
+              </div>
+              <span class="approval-badge" id="approval-badge">not approved</span>
+            </div>
+            <ol class="stage-list" id="stage-list"></ol>
+            <button class="approve-button" id="approve-button" type="button">
+              Approve this exact cut
+            </button>
+          </section>
+
+          <section class="inspector-section">
+            <div class="section-heading compact">
+              <div>
+                <p class="eyebrow">Review memory</p>
+                <h3>Open feedback</h3>
+              </div>
+              <span class="count-pill" id="note-count">0</span>
+            </div>
+            <div class="note-list" id="note-list"></div>
+
+            <p class="scope-note" id="scope-note" hidden>
+              This observation will be bound to the assembled full cut and its
+              global timecode.
+            </p>
+
+            <form class="note-composer" id="note-form">
+              <div class="composer-heading">
+                <strong>Add an observation</strong>
+                <button id="capture-time-button" type="button">Use 00:00.0</button>
+              </div>
+              <label class="sr-only" for="note-message">Observation</label>
+              <textarea
+                id="note-message"
+                rows="3"
+                placeholder="What did you notice in this exact cut?"
+                required
+              ></textarea>
+              <div class="composer-options">
+                <label>
+                  <span>Kind</span>
+                  <select id="note-category">
+                    <option value="visual">Visual</option>
+                    <option value="script">Script</option>
+                    <option value="audio">Audio</option>
+                    <option value="timing">Timing</option>
+                    <option value="factual">Factual</option>
+                    <option value="transition">Transition</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Priority</span>
+                  <select id="note-severity">
+                    <option value="note">Note</option>
+                    <option value="bug">Bug</option>
+                    <option value="blocker">Blocker</option>
+                  </select>
+                </label>
+                <button class="primary-button" type="submit">Save note</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="inspector-section provenance-summary">
+            <p class="eyebrow">Exact version</p>
+            <dl id="version-details">
+              <div><dt>Script</dt><dd>—</dd></div>
+              <div><dt>Scene</dt><dd>—</dd></div>
+              <div><dt>Take</dt><dd>—</dd></div>
+              <div><dt>Cut</dt><dd>—</dd></div>
+            </dl>
+          </section>
+        </div>
+      </aside>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/assets/app.js" defer></script>
+  </body>
+</html>

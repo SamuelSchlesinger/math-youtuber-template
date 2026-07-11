@@ -1,0 +1,7 @@
+version = 1
+requires-python = ">=3.11"
+
+[[package]]
+name = "chalk-video-workspace"
+version = "0.3.0"
+source = { virtual = "." }

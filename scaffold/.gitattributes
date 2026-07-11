@@ -1,0 +1,4 @@
+# Accepted human performances are irreplaceable source media. setup.sh installs
+# Git LFS; content-addressed names keep selection and lineage independent.
+media/takes/sha256/** filter=lfs diff=lfs merge=lfs -text
+releases/*.mp4 filter=lfs diff=lfs merge=lfs -text

@@ -1,0 +1,13 @@
+[project]
+name = "chalk-video-workspace"
+version = "0.3.0"
+description = "AI-native Markdown, Manim, voice, and review workspace"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+

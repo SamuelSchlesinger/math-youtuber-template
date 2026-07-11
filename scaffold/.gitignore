@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Local action cache, scratch recordings, locks, and materialized output.
+.chalk/cache/
+.chalk/tmp/
+.chalk/locks/
+.chalk/scratch/
+output/
+
+# Keep durable Chalk state, snapshots, and refs tracked.
+!.chalk/state.json
+!.chalk/snapshots/
+!.chalk/refs/
