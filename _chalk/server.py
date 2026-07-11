@@ -728,12 +728,19 @@ class ChalkRequestHandler(BaseHTTPRequestHandler):
         ):
             self._error(HTTPStatus.FORBIDDEN, "invalid media path")
             return
-        root = self.server.room.root
+        root = self.server.room.root.resolve()
         try:
             path = (root / relative).resolve()
-            path.relative_to(root)
+            resolved_relative = path.relative_to(root)
         except (OSError, ValueError):
             self._error(HTTPStatus.FORBIDDEN, "media path escapes project")
+            return
+        # The first component is validated above on the requested path, but a
+        # symlink under a media root can resolve to a file elsewhere in the
+        # project (for example scenes/). Require the resolved path to still live
+        # under a media root, not merely under the project.
+        if not resolved_relative.parts or resolved_relative.parts[0] not in MEDIA_ROOTS:
+            self._error(HTTPStatus.FORBIDDEN, "media path escapes media roots")
             return
         if not path.is_file() or path.suffix.lower() not in MEDIA_SUFFIXES:
             self._error(HTTPStatus.NOT_FOUND, "media not found")

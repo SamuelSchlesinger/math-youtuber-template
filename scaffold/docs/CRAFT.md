@@ -10,7 +10,9 @@ Write as if you are thinking aloud at a whiteboard with a smart friend.
   needs it.
 - Use “you,” “we,” and “our” naturally, and weave concrete examples through
   abstractions.
-- Connect each move to the previous one. Vary sentence length.
+- Connect each idea to the previous one, but let the narrative make the link
+  rather than announcing it ("this is how this connects to what we just saw").
+  Vary sentence length.
 - Explain rather than sell. Precision is more accessible than vagueness, and a
   well-explained result does not need hype.
 - Preserve the author's perspective and wording. Agents help with structure,
@@ -18,10 +20,43 @@ Write as if you are thinking aloud at a whiteboard with a smart friend.
 - Fact-check definitions, theorem statements, attributions, dates, and any
   factual visual label. Record uncertainty instead of improvising.
 
-Common AI tics to remove: significance inflation (“profound,” “pivotal,”
-“crucial”), repeated “not just X—but Y” constructions, rule-of-three lists,
-paired rhetorical questions, em-dash saturation, superficial participle tails,
-and recap closings. End on one earned thought.
+Two registers, kept apart. Narration is what the viewer hears; director notes,
+`outline.md`, and `feedback.md` are how we talk about the video. Craft shorthand
+(beat, move, payoff, cue, land, earn) belongs in the notes, never in a spoken
+line. In narration, name a step by its kind: a definition, a reduction, a
+diagonal argument, a change of variables, a specialization, a construction.
+Reserve "move," "trick," and "the game" for genuinely adversarial or game-tree
+settings, where the metaphor is literally true.
+
+Common AI tics to remove from narration. These are patterns; the listed terms
+are only symptoms, so fix the pattern instead of swapping one flagged word for
+another.
+
+- Significance inflation: "profound," "pivotal," "crucial," "vital,"
+  "groundbreaking," "remarkable," "elegant" asserted rather than shown; and the
+  phrasal form, "stands as a testament to," "plays a vital role," "marks a
+  turning point," "underscores the importance of." A good explanation carries
+  the weight; the adjective does not.
+- Filler openers: sentence-initial "Additionally," "Moreover," "Furthermore,"
+  "Notably," "Importantly," "It is important to note that." Delete them and open
+  on the content.
+- Negation templates: "not just X, but Y," "it's not X, it's Y," "not only ...
+  but also," and reflexive "X rather than Y." State the thing directly.
+- Rule-of-three lists: three adjectives or clauses where one concrete example is
+  stronger.
+- Editorial participle tails: sentences that end in an "-ing" gloss:
+  "..., highlighting its significance," "..., paving the way for," "...,
+  reflecting a broader shift." End on the fact.
+- Journey and dive clichés: "deep dive," "in the realm of," "navigating the
+  complexities of," "unpack," "let's explore," "the world of." Just do the thing.
+- Vague attribution: "studies show," "experts argue," "it is widely believed."
+  Name the paper, person, and year, or cut the claim.
+- Recap closings: "in summary," "in conclusion," "ultimately," a restatement of
+  every point. End on one earned thought.
+
+The Markdown has layout tells too: em-dash saturation, mechanical boldface,
+Title Case headings, emoji dividers, and "**Term:** gloss" list padding. Plain
+prose reads back better in a recording.
 
 ## Manim and layout
 

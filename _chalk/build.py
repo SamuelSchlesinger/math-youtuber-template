@@ -72,7 +72,7 @@ FULL_RECIPE = {
 
 RENDER_ENVIRONMENT_KEYS = (
     "python",
-    "python_distributions",
+    "manim_dependencies",
     "requirements_lock",
     "platform",
     "runtime",
@@ -300,6 +300,7 @@ class SubprocessExecutor:
             env=dict(env) if env is not None else None,
             check=True,
             text=True,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -317,6 +318,7 @@ class SubprocessExecutor:
             env=dict(env) if env is not None else None,
             check=False,
             text=True,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -464,7 +466,14 @@ def _raw_config(project: Any) -> Mapping[str, Any]:
 
 
 def _shared_python_hash(root: Path) -> str:
-    """Hash project helpers without walking caches or segment-local scenes."""
+    """Hash project helpers without walking caches or segment-local scenes.
+
+    Segment scenes (``scenes/<id>.py``) are hashed per segment, so they stay out
+    of this shared fingerprint. Shared scene helpers that every render can import
+    (``scenes/__init__.py`` and ``scenes/_*.py``) are not segment-local — editing
+    one changes what every scene renders — so they belong here. This is the exact
+    set validation permits in ``scenes/`` without a script segment marker.
+    """
 
     excluded = {
         ".chalk",
@@ -488,7 +497,30 @@ def _shared_python_hash(root: Path) -> str:
                 continue
             relative = (relative_directory / name).as_posix()
             records.append({"path": relative, "hash": hash_file(path)})
+    scenes_dir = root / "scenes"
+    if scenes_dir.is_dir():
+        for path in sorted(scenes_dir.glob("*.py")):
+            if path.name == "__init__.py" or path.name.startswith("_"):
+                relative = path.relative_to(root).as_posix()
+                records.append({"path": relative, "hash": hash_file(path)})
+    records.sort(key=lambda record: record["path"])
     return hash_bytes(canonical_json(records))
+
+
+def _merge_current_action(root: Path, key: str, action_key: str) -> None:
+    """Persist one ``current_actions`` pointer without clobbering concurrent edits.
+
+    Takes the cross-process state lock, reloads a fresh project, merges only this
+    single key, and writes the result back. A whole-state write would drop a
+    take-selection or approval another process committed after we loaded.
+    """
+
+    from .model import load_project, project_lock, save_state
+
+    with project_lock(root, "state"):
+        current = load_project(root)
+        current.state.current_actions[key] = action_key
+        save_state(root, current.state)
 
 
 def load_profile(project: Any, name: str | None = None) -> RenderProfile:
@@ -556,6 +588,7 @@ def _tool_identity(
             [executable, *arguments],
             check=False,
             text=True,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             timeout=timeout,
@@ -596,22 +629,39 @@ def _executable_identity(
     return identity
 
 
-def _python_distribution_inventory() -> list[dict[str, str]]:
-    inventory: list[dict[str, str]] = []
-    for distribution in importlib.metadata.distributions():
-        try:
-            name = str(
-                distribution.metadata.get("Name")
-                or distribution.metadata.get("Summary")
-                or "unknown"
-            )
-            version = str(distribution.version)
-        except (KeyError, OSError, TypeError, ValueError):
+def _manim_dependency_versions() -> list[dict[str, str]]:
+    """Versions of manim and its transitive (non-extra) dependency closure.
+
+    A render's pixels depend on manim and the packages it pulls in — numpy,
+    Pillow, pycairo, and so on — not on unrelated packages that merely share the
+    environment. Fingerprinting the whole installed inventory made any unrelated
+    ``pip install`` invalidate every cached render; walking manim's own closure
+    keeps the fingerprint relevant while still catching a real dependency bump.
+    """
+
+    seen: dict[str, str] = {}
+    frontier: list[str] = ["manim"]
+    while frontier:
+        raw = frontier.pop()
+        name = re.split(r"[<>=!~;,\[\(\s]", raw, maxsplit=1)[0]
+        name = name.strip().lower().replace("_", "-")
+        if not name or name in seen:
             continue
-        inventory.append({"name": name, "version": version})
+        try:
+            distribution = importlib.metadata.distribution(name)
+        except importlib.metadata.PackageNotFoundError:
+            seen[name] = "unavailable"
+            continue
+        seen[name] = str(distribution.version)
+        for requirement in distribution.requires or []:
+            # Skip optional extras: a project that does not install them cannot
+            # have its render affected by them.
+            if "extra ==" in requirement or "extra==" in requirement:
+                continue
+            frontier.append(requirement)
     return sorted(
-        inventory,
-        key=lambda item: (item["name"].casefold(), item["version"]),
+        ({"name": name, "version": version} for name, version in seen.items()),
+        key=lambda item: item["name"],
     )
 
 
@@ -624,18 +674,40 @@ def _fontconfig_identity() -> dict[str, Any]:
     return identity
 
 
+_ENVIRONMENT_CACHE: dict[str, dict[str, Any]] = {}
+_ENVIRONMENT_CACHE_LOCK = threading.Lock()
+
+
+def _reset_environment_cache() -> None:
+    """Drop the per-process environment fingerprint cache (used by tests)."""
+
+    with _ENVIRONMENT_CACHE_LOCK:
+        _ENVIRONMENT_CACHE.clear()
+
+
 def default_environment(
     project_root: str | os.PathLike[str] | None = None,
 ) -> dict[str, Any]:
+    # The environment fingerprint runs ~10 tool subprocesses and walks manim's
+    # dependency closure. The local server rebuilds a BuildEngine on every
+    # /api/project request, so memoize per resolved root: a page load or a
+    # cross-origin GET must not restart that whole probe each time. A toolchain
+    # change is picked up on the next process, the right cadence for one session.
+    root = Path(project_root).resolve() if project_root is not None else None
+    cache_key = str(root) if root is not None else None
+    if cache_key is not None:
+        with _ENVIRONMENT_CACHE_LOCK:
+            cached = _ENVIRONMENT_CACHE.get(cache_key)
+        if cached is not None:
+            return dict(cached)
     try:
         manim_package = importlib.metadata.version("manim")
     except importlib.metadata.PackageNotFoundError:
         manim_package = "unavailable"
-    root = Path(project_root).resolve() if project_root is not None else None
     requirements_lock = root / "requirements.lock" if root is not None else None
-    return {
+    environment: dict[str, Any] = {
         "python": platform.python_version(),
-        "python_distributions": _python_distribution_inventory(),
+        "manim_dependencies": _manim_dependency_versions(),
         "requirements_lock": (
             hash_file(requirements_lock)
             if requirements_lock is not None and requirements_lock.is_file()
@@ -658,6 +730,10 @@ def default_environment(
         "fontconfig": _fontconfig_identity(),
         "runtime": "chalk-runtime-v1",
     }
+    if cache_key is not None:
+        with _ENVIRONMENT_CACHE_LOCK:
+            _ENVIRONMENT_CACHE[cache_key] = dict(environment)
+    return environment
 
 
 class BuildEngine:
@@ -849,14 +925,10 @@ class BuildEngine:
         runtime = self.root / "chalk_runtime.py"
         assets = self.root / "assets"
         chalk_python = self.root / "_chalk"
-        build_runtime = chalk_python / "build.py"
-        if not build_runtime.is_file():
-            build_runtime = Path(__file__)
         timeline_runtime = chalk_python / "timeline.py"
         return {
             "style": hash_file(style) if style.is_file() else None,
             "runtime": hash_file(runtime) if runtime.is_file() else None,
-            "build_runtime": hash_file(build_runtime),
             "timeline_runtime": (
                 hash_file(timeline_runtime) if timeline_runtime.is_file() else None
             ),
@@ -1301,9 +1373,39 @@ class BuildEngine:
                 else timeline.duration_us
             ),
         )
-        if timeline.take is None:
+        take = timeline.take
+        audio_present = (
+            take is not None
+            and timeline.audio_path is not None
+            and timeline.audio_path.is_file()
+        )
+        if audio_present:
+            actual_audio = hash_file(timeline.audio_path).removeprefix("sha256:")
+            if actual_audio != take.audio_sha256:
+                raise BuildError(
+                    f"selected audio for {segment_id!r} fails its SHA-256 check"
+                )
+        # A missing selected-take blob (for example a fresh clone before its Git
+        # LFS media is pulled) is drafting status, not a structural error: fall
+        # back to silence with a warning, exactly like an unselected take. A hash
+        # mismatch above is a real integrity failure and still raises; only a
+        # release insists on real audio being present.
+        missing_warnings: tuple[str, ...] = ()
+        if take is None:
             if not draft:
                 raise BuildError(f"segment {segment_id!r} has no selected voice take")
+            use_silence = True
+        elif not audio_present:
+            if not draft:
+                raise BuildError(f"selected audio for {segment_id!r} is missing")
+            use_silence = True
+            missing_warnings = (
+                f"selected take for {segment_id!r} has no local audio; "
+                "previewing with silence",
+            )
+        else:
+            use_silence = False
+        if use_silence:
             audio_input: Mapping[str, Any] = {
                 "kind": "generated-silence",
                 "duration_us": cut_duration_us,
@@ -1311,18 +1413,11 @@ class BuildEngine:
                 "channels": "stereo",
             }
         else:
-            if timeline.audio_path is None or not timeline.audio_path.is_file():
-                raise BuildError(f"selected audio for {segment_id!r} is missing")
-            actual_audio = hash_file(timeline.audio_path).removeprefix("sha256:")
-            if actual_audio != timeline.take.audio_sha256:
-                raise BuildError(
-                    f"selected audio for {segment_id!r} fails its SHA-256 check"
-                )
             audio_input = {
                 "kind": "selected-take",
-                "take_id": timeline.take.id,
-                "audio": f"sha256:{timeline.take.audio_sha256}",
-                "narration": f"sha256:{timeline.take.narration_sha256}",
+                "take_id": take.id,
+                "audio": f"sha256:{take.audio_sha256}",
+                "narration": f"sha256:{take.narration_sha256}",
             }
         inputs = {
             "segment_id": segment_id,
@@ -1344,10 +1439,11 @@ class BuildEngine:
             tools = _raw_config(self.project).get("tools", {})
             if isinstance(tools, Mapping):
                 ffmpeg = str(tools.get("ffmpeg", ffmpeg))
-            if timeline.take is None:
+            if use_silence:
                 seconds = f"{cut_duration_us / 1_000_000:.6f}"
                 command = [
                     ffmpeg,
+                    "-nostdin",
                     "-v",
                     "error",
                     "-y",
@@ -1374,6 +1470,7 @@ class BuildEngine:
                     )
                 command = [
                     ffmpeg,
+                    "-nostdin",
                     "-v",
                     "error",
                     "-y",
@@ -1429,6 +1526,9 @@ class BuildEngine:
         )
         if materialize:
             self.store.materialize(result.record.outputs["video"], alias)
+        cut_warnings = tuple(timeline.warnings) + missing_warnings
+        if use_silence and not missing_warnings:
+            cut_warnings += ("draft cut uses generated silence",)
         artifact = Artifact(
             "cut",
             result.record.key,
@@ -1439,10 +1539,7 @@ class BuildEngine:
             segment_id,
             cut_duration_us,
             timeline.source,
-            (
-                timeline.warnings
-                or (("draft cut uses generated silence",) if timeline.take is None else ())
-            ),
+            cut_warnings,
         )
         self._remember(f"segment:{segment_id}:cut", artifact.action_key)
         self._remember(f"cut:{render_profile.name}:{segment_id}", artifact.action_key)
@@ -1555,6 +1652,7 @@ class BuildEngine:
             analysis_filter = "loudnorm=I=-14:TP=-1:LRA=11:print_format=json"
             analysis_command = [
                 ffmpeg,
+                "-nostdin",
                 "-hide_banner",
                 "-nostats",
                 "-v",
@@ -1588,7 +1686,7 @@ class BuildEngine:
                 ":linear=true:print_format=summary"
             )
             command = [
-                ffmpeg, "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(concat),
+                ffmpeg, "-nostdin", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(concat),
                 "-c:v", "libx264", "-preset", "slow", "-crf", str(render_profile.video_crf),
                 "-pix_fmt", "yuv420p", "-af", normalization_filter,
                 "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
@@ -1713,6 +1811,7 @@ class BuildEngine:
             subprocess.Popen(
                 [player, "-autoexit", str(path)],
                 cwd=self.root,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -1882,10 +1981,20 @@ class BuildEngine:
             return
         with self._state_lock:
             actions[key] = action_key
-            if not self.defer_state:
-                save = getattr(self.project, "save_state", None)
-                if callable(save):
-                    save()
+            if self.defer_state:
+                return
+            # Persist just this derived-action pointer. Writing the engine's whole
+            # in-memory state here would clobber a concurrent take-selection or
+            # approval edit made after this engine loaded. For a real project on
+            # disk, merge only this key under the cross-process lock (the same
+            # discipline as _commit_current); a test double with no chalk.toml
+            # keeps the older in-memory save.
+            if (self.root / "chalk.toml").is_file():
+                _merge_current_action(self.root, key, action_key)
+                return
+            save = getattr(self.project, "save_state", None)
+            if callable(save):
+                save()
 
 
 class _CallableExecutor:

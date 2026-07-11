@@ -187,6 +187,38 @@ It ignores caches, scratch recordings, previews, and ordinary derived output. A 
 may combine validation, a content snapshot, and an intentional Git commit, but
 Git remains visible and usable directly.
 
+## Security and trust boundary
+
+Chalk is a single-user local tool. Its safety model is a trust boundary, not a
+sandbox: everything inside a project directory is author-authored input, and the
+machine running Chalk is trusted.
+
+- **A project is code.** `chalk.toml` (`[tools]` executables, profile
+  `manim_args`), `scenes/`, `style.py`, and project helpers are executed or
+  imported when a project is built, and configured tools are probed for their
+  version even by read-only commands like `chalk` status and the review server's
+  project page. Do not open or build a project you did not author or review — the
+  same caution Git hooks, a Makefile, or a virtualenv warrant.
+- **The review server is loopback-only and single-user.** It binds
+  `127.0.0.1`, rejects non-loopback `Host` headers, requires a JSON content type
+  on mutations so a browser page cannot forge one, and caps request bodies. It is
+  not a multi-tenant service and must not be exposed to a network.
+- **The working cache is trusted local state.** Action records under
+  `.chalk/cache` bind an operation's inputs to content-addressed outputs, and
+  every blob is verified against its hash on read, so output *contents* cannot be
+  forged. A process that can write the cache directory is trusted; the directory
+  is ignored by Git and rebuilt on demand rather than shared.
+- **Locks are advisory and assume a local filesystem.** `flock`-based project
+  and action locks serialize concurrent agents on one machine. On a network
+  filesystem where `flock` is a no-op, concurrent `state.json` or action writes
+  may race; run Chalk against a local working copy.
+
+Two surfaces are held to a stricter rule than the rest of the project, because
+their output is shared: a note's artifact reference and an expanded context
+directory never resolve or embed files outside the project root, and a directory
+expansion skips hidden files. A committed `feedback.md` or context pack therefore
+cannot leak secrets from elsewhere on the machine.
+
 ## Explicit non-goals
 
 - no custom renderer or scene interchange format;

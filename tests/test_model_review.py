@@ -538,6 +538,30 @@ class ReviewTests(unittest.TestCase):
             after = create_snapshot(load_project(root)).digest
             self.assertNotEqual(before, after)
 
+    def test_context_pack_skips_hidden_files_during_directory_expansion(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            root = make_project(workspace / "video")
+            project = load_project(root)
+            sibling = workspace / "sibling"
+            write(sibling / "notes.md", "# Notes\n\nvisible reference.\n")
+            write(sibling / ".env", "SECRET_TOKEN=hunter2\n")
+            write(sibling / ".ssh" / "id_rsa", "PRIVATE KEY\n")
+
+            pack = context_add(project, [sibling], name="sibling dir")
+            packed = {record["path"] for record in pack.files}
+            self.assertIn("notes.md", packed)
+            self.assertNotIn(".env", packed)
+            self.assertNotIn(".ssh/id_rsa", packed)
+            self.assertIn(".env", pack.skipped_hidden)
+            contents = pack.path.read_text(encoding="utf-8")
+            self.assertNotIn("hunter2", contents)
+            self.assertNotIn("PRIVATE KEY", contents)
+
+            # Explicitly naming a dotfile still includes it (user intent).
+            explicit = context_add(project, [sibling / ".env"], name="explicit env")
+            self.assertTrue(any(record["path"] == ".env" for record in explicit.files))
+
 
 if __name__ == "__main__":
     unittest.main()

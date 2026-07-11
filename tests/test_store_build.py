@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import os
 import subprocess
@@ -48,7 +49,7 @@ class StoreTests(unittest.TestCase):
             }
             with (
                 patch(
-                    "_chalk.build._python_distribution_inventory",
+                    "_chalk.build._manim_dependency_versions",
                     return_value=[{"name": "manim", "version": "0.20.1"}],
                 ),
                 patch("_chalk.build._tool_identity", return_value=identity),
@@ -64,7 +65,7 @@ class StoreTests(unittest.TestCase):
                 environment = default_environment(root)
             self.assertEqual(environment["requirements_lock"], hash_file(lock))
             self.assertEqual(
-                environment["python_distributions"],
+                environment["manim_dependencies"],
                 [{"name": "manim", "version": "0.20.1"}],
             )
             for key in (
@@ -78,6 +79,73 @@ class StoreTests(unittest.TestCase):
                 "fontconfig",
             ):
                 self.assertIn(key, environment)
+
+    def test_manim_dependency_closure_walks_requires_and_skips_unrelated(self) -> None:
+        import _chalk.build as build
+
+        class FakeDist:
+            def __init__(self, version: str, requires: list[str] | None) -> None:
+                self.version = version
+                self.requires = requires
+
+        dists = {
+            "manim": FakeDist("0.18.0", ["numpy>=1.2", "Pillow", "pytest; extra == 'test'"]),
+            "numpy": FakeDist("1.26.0", []),
+            "pillow": FakeDist("10.0.0", None),
+            # Installed but not reachable from manim; must stay out of the closure.
+            "unrelated": FakeDist("9.9.9", []),
+        }
+
+        def fake_distribution(name: str) -> FakeDist:
+            key = name.lower().replace("_", "-")
+            if key in dists:
+                return dists[key]
+            raise importlib.metadata.PackageNotFoundError(name)
+
+        with patch("importlib.metadata.distribution", side_effect=fake_distribution):
+            result = build._manim_dependency_versions()
+
+        versions = {item["name"]: item["version"] for item in result}
+        self.assertEqual(versions.get("manim"), "0.18.0")
+        self.assertEqual(versions.get("numpy"), "1.26.0")
+        self.assertEqual(versions.get("pillow"), "10.0.0")
+        self.assertNotIn(
+            "unrelated", versions, "unrelated packages must not enter the render key"
+        )
+        self.assertNotIn("pytest", versions, "optional extras must be skipped")
+
+    def test_default_environment_is_memoized_per_root(self) -> None:
+        import _chalk.build as build
+
+        build._reset_environment_cache()
+        tool = {
+            "available": True,
+            "returncode": 0,
+            "output_sha256": "sha256:" + "a" * 64,
+            "output": "",
+        }
+        font = {
+            "available": True,
+            "font_count": 0,
+            "inventory_sha256": "sha256:" + "b" * 64,
+        }
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                with (
+                    patch("_chalk.build._manim_dependency_versions") as deps,
+                    patch("_chalk.build._tool_identity", return_value=tool),
+                    patch("_chalk.build._fontconfig_identity", return_value=font),
+                ):
+                    deps.return_value = [{"name": "manim", "version": "0.1"}]
+                    first = build.default_environment(root)
+                    second = build.default_environment(root)
+                    self.assertEqual(
+                        deps.call_count, 1, "environment must be computed once per root"
+                    )
+                self.assertEqual(first, second)
+        finally:
+            build._reset_environment_cache()
 
     def test_action_invalidation_verified_hits_and_tamper_repair(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -649,6 +717,97 @@ class BuildTests(unittest.TestCase):
             with self.assertRaisesRegex(BuildError, "probe rejected"):
                 engine.render_segment("a", "draft")
             self.assertIsNone(engine.store.lookup_action(key))
+
+    def test_draft_degrades_to_silence_when_selected_take_blob_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self.make_project(root)
+            engine = BuildEngine(
+                project,
+                executor=FakeExecutor(),
+                validator=accept_media,
+                environment={
+                    "python": "3.11",
+                    "platform": "test",
+                    "manim": "test",
+                    "ffmpeg": "test",
+                    "runtime": "test",
+                },
+            )
+
+            def converter(source: Path, destination: Path) -> None:
+                destination.write_bytes(b"fLaC" + source.read_bytes())
+
+            def transcriber(path: Path, *_: object) -> dict[str, object]:
+                return {
+                    "words": [
+                        {"word": "alpha", "start": 0.1, "end": 0.8},
+                        {"word": "narration", "start": 0.8, "end": 1.9},
+                    ]
+                }
+
+            audio = AudioStore(
+                root,
+                converter=converter,
+                prober=lambda _: 2_000_000,
+                transcriber=transcriber,
+            )
+            source = root / "take.wav"
+            source.write_bytes(b"RIFF-one")
+            take = audio.import_take("a", "alpha narration", source, select=True)
+            audio.transcribe_take(
+                take,
+                model="fake",
+                revision=MODEL_REVISION,
+                model_fingerprint="sha256:model",
+            )
+
+            blob = audio.take_path(take)
+            self.assertTrue(blob.is_file())
+            blob.unlink()  # a fresh clone before its Git LFS media is pulled
+
+            # Draft must not treat the absent blob as a structural error: it
+            # degrades to silence and warns, exactly like an unselected take.
+            cut = engine.composite_segment("a", "draft")
+            self.assertTrue(
+                any("no local audio" in warning for warning in cut.warnings),
+                cut.warnings,
+            )
+
+            # A release still insists on the real audio, and the error names a
+            # missing blob (not an unselected take), proving the take is selected
+            # and fresh — only its media is absent.
+            with self.assertRaisesRegex(BuildError, "missing"):
+                engine.composite_segment("a", draft=False)
+
+    def test_composite_ffmpeg_command_disables_stdin(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self.make_project(root)
+            executor = FakeExecutor()
+            engine = BuildEngine(
+                project,
+                executor=executor,
+                validator=accept_media,
+                environment={
+                    "python": "3.11",
+                    "platform": "test",
+                    "manim": "test",
+                    "ffmpeg": "test",
+                    "runtime": "test",
+                },
+            )
+            engine.composite_segment("a", "draft")
+            ffmpeg_calls = [
+                command
+                for command, _cwd, _env in executor.calls
+                if command and command[0] != "manim"
+            ]
+            self.assertTrue(ffmpeg_calls, "expected an ffmpeg composite command")
+            self.assertTrue(
+                all("-nostdin" in command for command in ffmpeg_calls),
+                ffmpeg_calls,
+            )
 
     def test_selected_transcript_changes_timeline_and_strict_mode_requires_it(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

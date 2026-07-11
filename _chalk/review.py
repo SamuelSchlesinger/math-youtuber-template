@@ -230,7 +230,12 @@ def _tool_records(project: Project) -> list[dict[str, Any]]:
 
 
 def _helper_records(project: Project) -> list[dict[str, Any]]:
-    """Bind author-owned Python imported by scenes outside the scene directory."""
+    """Bind author-owned Python imported by scenes outside the scene directory,
+    plus shared scene helpers (``scenes/__init__.py`` and ``scenes/_*.py``).
+
+    Segment scenes are bound per segment; the shared helpers they import are not,
+    so without this they would never enter a snapshot or an approval fingerprint.
+    """
 
     excluded_roots = {".chalk", ".venv", "_chalk", "output", "scenes"}
     excluded_files = {project.config.style.as_posix(), "chalk_runtime.py"}
@@ -241,6 +246,11 @@ def _helper_records(project: Project) -> list[dict[str, Any]]:
             continue
         if path.is_file():
             candidates.append(path)
+    scenes_dir = project.root / project.config.scenes
+    if scenes_dir.is_dir():
+        for path in sorted(scenes_dir.glob("*.py")):
+            if path.name == "__init__.py" or path.name.startswith("_"):
+                candidates.append(path)
     return [_file_record(project.root, path) for path in candidates]
 
 
@@ -468,12 +478,24 @@ def _artifact_record(project: Project, artifact: Any) -> Mapping[str, Any] | Non
         return None
     if isinstance(artifact, Mapping):
         return dict(artifact)
-    path = Path(os.fspath(artifact)).expanduser()
+    reference = os.fspath(artifact)
+    # An artifact reference names a build product inside the project. Resolve it
+    # only within the project root: otherwise a note could bind the SHA-256,
+    # size, existence, and absolute path of any file on disk (for example
+    # ~/.ssh/id_rsa) into the tracked, shareable feedback.md. A leading ``~`` is
+    # not a project path, so it is deliberately not expanded.
+    path = Path(reference)
     if not path.is_absolute():
         path = project.root / path
-    if path.is_file():
-        return _file_record(project.root, path)
-    return {"ref": os.fspath(artifact)}
+    root = project.root.resolve()
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(root)
+    except (ValueError, OSError):
+        return {"ref": reference}
+    if resolved.is_file():
+        return _file_record(project.root, resolved)
+    return {"ref": reference}
 
 
 def _feedback_path(project: Project) -> Path:
@@ -840,18 +862,28 @@ def approval_status(
     )
 
 
-def _expand_context_paths(paths: Iterable[str | os.PathLike[str]]) -> list[Path]:
+def _expand_context_paths(
+    paths: Iterable[str | os.PathLike[str]],
+) -> tuple[list[Path], list[Path]]:
     expanded: list[Path] = []
+    skipped: list[Path] = []
     for value in paths:
         path = Path(value).expanduser().resolve()
         if path.is_dir():
-            expanded.extend(
-                candidate
-                for candidate in sorted(path.rglob("*"))
-                if candidate.is_file()
-                and ".git" not in candidate.parts
-                and ".chalk" not in candidate.parts
-            )
+            for candidate in sorted(path.rglob("*")):
+                if not candidate.is_file():
+                    continue
+                # Skip hidden files and anything under a hidden directory
+                # (.env, .netrc, .ssh, .git, .chalk, ...). A committed context
+                # pack must not slurp secrets during a directory expansion; name
+                # a dotfile explicitly to include it on purpose.
+                if any(
+                    part.startswith(".")
+                    for part in candidate.relative_to(path).parts
+                ):
+                    skipped.append(candidate)
+                    continue
+                expanded.append(candidate)
         elif path.is_file():
             expanded.append(path)
         else:
@@ -859,7 +891,7 @@ def _expand_context_paths(paths: Iterable[str | os.PathLike[str]]) -> list[Path]
     unique = sorted(set(expanded))
     if not unique:
         raise ReviewError("no context files selected")
-    return unique
+    return unique, sorted(set(skipped))
 
 
 def _source_root(files: Sequence[Path]) -> Path:
@@ -913,6 +945,7 @@ class ContextPack:
     path: Path
     index_path: Path
     files: tuple[Mapping[str, Any], ...]
+    skipped_hidden: tuple[str, ...] = ()
 
 
 def context_add(
@@ -924,7 +957,7 @@ def context_add(
     """Pin selected reference files into one content-addressed Markdown pack."""
 
     current = _fresh_project(project)
-    files = _expand_context_paths(paths)
+    files, skipped = _expand_context_paths(paths)
     source_root = _source_root(files)
     git = _source_git_provenance(source_root)
     records: list[dict[str, Any]] = []
@@ -1014,7 +1047,13 @@ def context_add(
             index += entry + "\n"
             atomic_write_text(index_path, index)
 
-    return ContextPack(digest, pack_path, index_path, tuple(records))
+    return ContextPack(
+        digest,
+        pack_path,
+        index_path,
+        tuple(records),
+        skipped_hidden=tuple(sorted({path.name for path in skipped})),
+    )
 
 
 __all__ = [

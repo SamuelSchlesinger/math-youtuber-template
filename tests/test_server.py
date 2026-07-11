@@ -369,6 +369,20 @@ class SchemaOnlyTests(unittest.TestCase):
             handler._serve_project_media("output/escape.mp4", head=False)
             self.assertEqual(handler.observed[0], 403)
 
+            # A symlink under a media root that resolves to a media-suffixed file
+            # elsewhere *inside* the project (not a media root) must also be
+            # refused: relative_to(root) alone would allow it.
+            (root / "scenes").mkdir()
+            inside = root / "scenes/diagram.mp4"
+            inside.write_bytes(b"not under a media root")
+            sneak = root / "output/sneak.mp4"
+            try:
+                sneak.symlink_to(inside)
+            except OSError:
+                return
+            handler._serve_project_media("output/sneak.mp4", head=False)
+            self.assertEqual(handler.observed[0], 403)
+
     def test_local_host_boundary_and_active_media_types(self) -> None:
         for value in ("127.0.0.1", "127.0.0.1:8042", "localhost", "[::1]:443"):
             self.assertTrue(_is_loopback_host(value))

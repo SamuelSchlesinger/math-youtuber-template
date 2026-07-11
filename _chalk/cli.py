@@ -1058,6 +1058,17 @@ def _cmd_context_add(args: argparse.Namespace) -> int:
         _emit_json(pack)
     else:
         print(f"pinned {len(pack.files)} file(s) as {pack.digest[:12]}")
+        if pack.skipped_hidden:
+            preview = ", ".join(pack.skipped_hidden[:5])
+            more = (
+                ""
+                if len(pack.skipped_hidden) <= 5
+                else f" (+{len(pack.skipped_hidden) - 5} more)"
+            )
+            print(
+                f"skipped {len(pack.skipped_hidden)} hidden file(s): {preview}{more}; "
+                "name one explicitly to include it"
+            )
     return 0
 
 

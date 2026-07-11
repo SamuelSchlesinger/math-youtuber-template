@@ -53,7 +53,11 @@ def _utc_now() -> str:
 
 def _default_runner(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        list(command), check=True, capture_output=True, text=True
+        list(command),
+        check=True,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
     )
 
 
@@ -220,6 +224,7 @@ class AudioStore:
         self.runner(
             [
                 "ffmpeg",
+                "-nostdin",
                 "-v",
                 "error",
                 "-y",
